@@ -49,6 +49,7 @@ const mapPane = createMapPane(el('map'), {
     void objectName(viewerApi, ref.modelId, ref.id).then((name) => store.setName(ref, name));
   },
   selectInModel: (ref) => void modelPane.select(ref),
+  drawingChanged: (on) => drawingChanged(on),
 });
 const naming = new Set<string>();
 
@@ -67,6 +68,10 @@ const statusEl = el<HTMLSpanElement>('status');
 const sectionInfo = el<HTMLSpanElement>('section-info');
 
 drawBtn.addEventListener('click', () => mapPane.startDrawing());
+const drawingChanged = (on: boolean) => {
+  drawBtn.classList.toggle('active', on);
+  drawBtn.textContent = on ? 'Cancel drawing' : 'Draw section';
+};
 flipBtn.addEventListener('click', () => store.flipSide());
 clearBtn.addEventListener('click', () => store.setLine(null));
 snapBtn.addEventListener('click', () => void modelPane.snapToSection());
@@ -244,7 +249,9 @@ connectToHost()
     if (!host) {
       mapPane.setProject(null);
       // Opened on its own (for example `npm run dev`): a few made-up buildings so the map and the section can be tried.
-      store.setElements(demoElements());
+      const demo = demoElements();
+      updatePlacement(demo[0].min[0]);
+      store.setElements(demo);
       store.setStatus('Demo data: open this extension inside a Trimble Connect project to load its models.');
       return;
     }

@@ -122,10 +122,7 @@ body.resizing iframe { pointer-events: none; }
 #status.busy::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border: 2px solid #9fc3dd; border-top-color: #0063a3; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.draw-section { position: absolute; top: 8px; left: 8px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid #9aa7b3; border-radius: 4px; background: #fff; color: #c62828; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
-.draw-section:hover { background: #fdf0f0; }
-.draw-section.active { background: #c62828; border-color: #c62828; color: #fff; }
-.draw-hint { position: absolute; top: 46px; left: 8px; z-index: 5; padding: 4px 8px; border-radius: 4px; background: rgba(27, 31, 36, 0.88); color: #fff; font-size: 12px; pointer-events: none; }
+.draw-hint { position: absolute; top: 8px; left: 8px; z-index: 5; padding: 4px 8px; border-radius: 4px; background: rgba(27, 31, 36, 0.88); color: #fff; font-size: 12px; pointer-events: none; }
 .draw-hint[hidden] { display: none; }
 .section-handle { width: 22px; height: 22px; border-radius: 50%; background: #c62828; color: #fff; border: 2px solid #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; cursor: grab; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
 .section-handle:active { cursor: grabbing; }
@@ -144,3 +141,6 @@ body.resizing iframe { pointer-events: none; }
 .models-row { display: flex; align-items: center; gap: 6px; color: #1b1f24; cursor: pointer; padding: 1px 0; }
 .models-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .models-note { font-size: 11px; color: #7a8591; }
+.viewer-error { background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.viewer-error p { margin: 0; max-width: 340px; }
+#btn-draw.active { background: #c62828; border-color: #c62828; }

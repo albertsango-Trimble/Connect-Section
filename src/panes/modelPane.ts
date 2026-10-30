@@ -202,7 +202,41 @@ export function createModelPane(container: HTMLElement): ModelPane {
   let cameraTimer: number | undefined;
   let lastCamera: unknown = null;
 
+  /** Loads the embedded viewer, trying again with a fresh frame when Connect's embedded app fails while starting up. */
   async function begin(projectId: string, getToken: () => string | undefined, onReady: (api: WorkspaceApi) => void): Promise<void> {
+    const ATTEMPTS = 3;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await attemptStart(projectId, getToken, onReady);
+        return;
+      } catch (err) {
+        console.warn(`[section viewer] 3D viewer start attempt ${attempt} of ${ATTEMPTS} failed`, err);
+        if (attempt >= ATTEMPTS) {
+          showStartError(err);
+          throw err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+      }
+    }
+  }
+
+  const showStartError = (err: unknown) => {
+    const box = document.createElement('div');
+    box.className = 'empty viewer-error';
+    const text = document.createElement('p');
+    text.textContent = `Could not load the Connect 3D viewer: ${err instanceof Error ? err.message : String(err)}`;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn primary';
+    retry.textContent = 'Try again';
+    retry.addEventListener('click', () => {
+      if (lastStart) void begin(lastStart.projectId, lastStart.getToken, lastStart.onReady).catch(() => undefined);
+    });
+    box.append(text, retry);
+    container.replaceChildren(box);
+  };
+
+  async function attemptStart(projectId: string, getToken: () => string | undefined, onReady: (api: WorkspaceApi) => void): Promise<void> {
     const token = getToken();
     if (!token) throw new Error('No access token yet');
     const iframe = document.createElement('iframe');
@@ -236,17 +270,17 @@ export function createModelPane(container: HTMLElement): ModelPane {
       );
       await api.embed.setTokens({ accessToken: token });
       await api.embed.init3DViewer({ projectId });
-      onReady(api);
-      if (store.section) void apply();
     } catch (err) {
       api = null;
-      const el = document.createElement('div');
-      el.className = 'empty';
-      el.style.background = '#fff';
-      el.textContent = `Could not load the Connect 3D viewer: ${err instanceof Error ? err.message : String(err)}`;
-      container.appendChild(el);
       throw err;
     }
+    // Kept out of the try above so a problem in this extension's own start-up isn't reported as the viewer failing.
+    try {
+      onReady(api);
+    } catch (err) {
+      console.error('[section viewer] start-up after the 3D viewer loaded failed', err);
+    }
+    if (store.section) void apply();
   }
 
   let lastStart: { projectId: string; getToken: () => string | undefined; onReady: (api: WorkspaceApi) => void } | null = null;
