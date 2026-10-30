@@ -86,6 +86,15 @@ class Store {
     this.recompute();
   }
 
+  /** Puts back a whole section at once: its line, the side it is seen from and its depth (null for automatic). */
+  restoreSection(line: [XY, XY], side: 1 | -1, depth: number | null): void {
+    this.side = side;
+    write(SIDE_KEY, String(side));
+    this.depth = depth !== null && Number.isFinite(depth) && depth > 0 ? depth : null;
+    this.line = line;
+    this.recompute();
+  }
+
   flipSide(): void {
     this.side = this.side === 1 ? -1 : 1;
     write(SIDE_KEY, String(this.side));
