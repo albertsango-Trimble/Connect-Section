@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cross Section Viewer</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header id="toolbar">
+      <strong>Cross Section Viewer</strong>
+      <button type="button" class="btn primary" id="btn-draw" title="Draw a section line on the map: click its start, then its end">Draw section</button>
+      <button type="button" class="btn" id="btn-flip" title="Look at the cut from the other side of the line" disabled>⇄ Flip side</button>
+      <label class="heading-ctl" title="How far behind the cut is kept. Automatic takes it from the elements the line crosses.">
+        Depth
+        <label class="inline-check"><input type="checkbox" id="depth-auto" checked /> auto</label>
+        <input id="depth-number" type="number" min="0.1" max="1000" step="0.5" value="5" disabled /> m
+      </label>
+      <label class="heading-ctl" title="Hide everything the section line doesn't cross"><input type="checkbox" id="isolate" /> Only crossed elements</label>
+      <label class="heading-ctl" title="Look at the cut without perspective, like a drawn section"><input type="checkbox" id="ortho" /> Orthographic</label>
+      <button type="button" class="btn" id="btn-snap" title="Put the 3D view square-on to the cut again" disabled>Snap to section</button>
+      <button type="button" class="btn" id="btn-clear" title="Remove the section line and its clipping" disabled>Clear</button>
+      <button type="button" class="btn" id="btn-models" title="Choose which project models are loaded">Models</button>
+      <span id="status"></span>
+    </header>
+    <div id="models-panel" class="models-panel" hidden>
+      <div class="models-head"><strong>Project models</strong><button type="button" id="models-close" class="source-close" title="Close">×</button></div>
+      <div class="models-actions"><button type="button" id="models-all">Load all</button><button type="button" id="models-none">Unload all</button></div>
+      <div id="models-list" class="models-list"></div>
+      <div class="models-note">Every model in the project is loaded when the extension opens. Untick one to leave it out next time.</div>
+    </div>
+    <main id="panes">
+      <section class="pane" id="pane-map"><div class="pane-title">Map<span class="pane-right"><button type="button" class="pane-check" id="btn-fit" title="Zoom the map to the loaded models">Zoom to models</button></span></div><div class="pane-body" id="map"></div></section>
+      <div class="splitter splitter-v" id="split-v" role="separator" aria-orientation="vertical" title="Drag to resize (double-click to reset)"></div>
+      <section class="pane" id="pane-model"><div class="pane-title">3D section<span id="section-info"></span><span class="pane-right"><button type="button" class="pane-check" id="btn-invert" title="If the clipping keeps the wrong part of the model, swap which way the planes cut">Invert clipping</button><button type="button" class="pane-check" id="reload-model" title="Load the 3D viewer again, for example after it shows an error">Reload 3D</button></span></div><div class="pane-body" id="model"></div></section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

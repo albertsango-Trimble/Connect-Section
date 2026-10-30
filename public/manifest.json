@@ -1,0 +1,7 @@
+{
+  "title": "Cross Section Viewer",
+  "description": "Draw a line on the map and see the model cut along it in the 3D view",
+  "url": "https://albertsango-trimble.github.io/Connect-Section/",
+  "icon": "https://albertsango-trimble.github.io/Connect-Section/icon.svg",
+  "extensionType": ["project"]
+}
