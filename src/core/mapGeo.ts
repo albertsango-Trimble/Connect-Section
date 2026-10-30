@@ -4,7 +4,8 @@ import type { XY } from './section';
 /** Metres per degree used to draw a model with no coordinate system on a blank grid around 0°, 0°. */
 const M_PER_DEG = 111320;
 
-let local = true;
+/** Starts on the earth so the base map shows while the models load; switched once their coordinates are known. */
+let local = false;
 const listeners = new Set<() => void>();
 
 /**

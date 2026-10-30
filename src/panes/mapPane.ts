@@ -64,7 +64,7 @@ function save(state: SavedBase): void {
 export interface MapPane {
   /** Says which project is open (null when not inside Connect), so its saved GeoTIFF base maps can be brought back */
   setProject(projectId: string | null): void;
-  /** Starts drawing a section line */
+  /** Starts drawing a section line, or stops if already drawing */
   startDrawing(): void;
   /** Zooms the map to the loaded models */
   fitModels(): void;
@@ -80,6 +80,8 @@ export interface MapPaneOptions {
   projectTiffClient?: (item: ProjectItem) => RangeClient | null;
   /** Asks for an object's name, which arrives later through the store */
   wantName?: (ref: ObjectRef) => void;
+  /** Told when drawing a section line starts or stops */
+  drawingChanged?: (on: boolean) => void;
   /** Selects an element in the 3D view (a click on its footprint) */
   selectInModel?: (ref: ObjectRef) => void;
 }
@@ -234,10 +236,10 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       if (map.getLayer(tiffLayer(t.id))) map.setLayoutProperty(tiffLayer(t.id), 'visibility', mode === 'geotiff' && t.visible && !isLocalGrid() ? 'visible' : 'none');
     });
     control.classList.toggle('local-grid', isLocalGrid());
-    hint.hidden = !isLocalGrid();
+    hint.hidden = !(isLocalGrid() && hasContent());
     const crsName = getProjectCrsName();
     hint.textContent = crsName
-      ? `The project's coordinate system (${crsName}) isn't recognised yet, so the models are drawn on a blank grid.`
+      ? `The models don't line up with the project's coordinate system (${crsName}), so they are drawn on a blank grid.`
       : 'No coordinate system is set for this project, so the models are drawn on a blank grid.';
     updateButtons();
   };
@@ -759,6 +761,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     if (!ready) return;
     byKey.clear();
     for (const e of store.elements) byKey.set(refKey(e), e);
+    showBase();
     setData('element-footprints', { type: 'FeatureCollection', features: polygon(store.elements.map(ringOf)) });
     if (!fitted && store.elements.length) {
       fitted = true;
@@ -915,12 +918,6 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   // ---- Drawing a section line: click the start, then click the end ----
   let drawing: 'idle' | 'first' | 'second' = 'idle';
   let drawStart: [number, number] | null = null;
-  const drawBtn = document.createElement('button');
-  drawBtn.type = 'button';
-  drawBtn.className = 'draw-section';
-  drawBtn.innerHTML = '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 17 L17 3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="3" cy="17" r="2.4" fill="currentColor"/><circle cx="17" cy="3" r="2.4" fill="currentColor"/></svg><span>Draw section</span>';
-  drawBtn.title = 'Click the start of the section line on the map, then click its end (Esc cancels)';
-  container.appendChild(drawBtn);
   const drawHint = document.createElement('div');
   drawHint.className = 'draw-hint';
   drawHint.hidden = true;
@@ -928,7 +925,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
 
   const setDrawing = (next: typeof drawing) => {
     drawing = next;
-    drawBtn.classList.toggle('active', next !== 'idle');
+    options.drawingChanged?.(next !== 'idle');
     map.getCanvas().style.cursor = next === 'idle' ? '' : 'crosshair';
     drawHint.hidden = next === 'idle';
     drawHint.textContent = next === 'first' ? 'Click where the section starts' : 'Click where the section ends · Esc to cancel';
@@ -941,8 +938,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       tip.hidden = true;
     }
   };
-  const startDrawing = () => setDrawing('first');
-  drawBtn.addEventListener('click', () => setDrawing(drawing === 'idle' ? 'first' : 'idle'));
+  const startDrawing = () => setDrawing(drawing === 'idle' ? 'first' : 'idle');
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && drawing !== 'idle') setDrawing('idle');
   });
