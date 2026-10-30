@@ -6,9 +6,20 @@ const MAX_OBJECTS = 200000;
 /** Objects per bounding box request */
 const CHUNK = 1000;
 
+/** A model loaded in the 3D viewer. */
+export interface IndexedModel {
+  /** The id its objects are known by in the viewer (the file id or the version id) */
+  id: string;
+  /** The Connect file id and version id */
+  fileId: string;
+  versionId?: string;
+  name: string;
+  objects: number;
+}
+
 export interface IndexResult {
   elements: Element[];
-  models: { id: string; name: string; objects: number }[];
+  models: IndexedModel[];
   /** True when there were more objects than MAX_OBJECTS */
   partial: boolean;
 }
@@ -99,7 +110,7 @@ export async function readElements(api: WorkspaceApi, progress: (text: string) =
         count++;
       }
     }
-    models.push({ id: modelId, name: model.name, objects: count });
+    models.push({ id: modelId, fileId: model.id, versionId: model.versionId, name: model.name, objects: count });
   }
   return { elements, models, partial };
 }

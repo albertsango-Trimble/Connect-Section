@@ -1,4 +1,4 @@
-import { DEFAULT_EXTENSIONS, sectionText, TopicsApi, type NewViewpoint, type Topic, type TopicExtensions, type TopicSection } from '../connect/topicsApi';
+import { DEFAULT_EXTENSIONS, sectionText, TopicsApi, type NewViewpoint, type Topic, type TopicExtensions, type TopicFile, type TopicSection } from '../connect/topicsApi';
 import { store } from '../state/store';
 import { topicsStore } from '../state/topics';
 
@@ -16,6 +16,12 @@ export interface TopicsPanelOptions {
   showSection: (section: TopicSection) => void;
   /** Moves the map to a place given in model coordinates */
   showPlace: (x: number, y: number) => void;
+  /** The models the section cuts through (every loaded model when there is no section) */
+  sectionModels: () => TopicFile[];
+  /** External ids (IFC GUIDs) of the elements the section cuts */
+  crossedIds: () => Promise<string[]>;
+  /** Loads a topic's linked models into the 3D viewer if they aren't loaded */
+  loadModels: (files: TopicFile[]) => Promise<void>;
   /** The signed-in user's email, once known, for "assigned to me" */
   me: () => string | undefined;
 }
@@ -194,6 +200,10 @@ export function createTopicsPanel(opts: TopicsPanelOptions): { load: () => void 
     const useView = h('input', { type: 'checkbox', checked: false, disabled: true });
     let camera: Omit<NewViewpoint, 'snapshot'> | null = null;
     const useSection = h('input', { type: 'checkbox', checked: !!section, disabled: !section });
+    const models = opts.sectionModels();
+    const useModels = h('input', { type: 'checkbox', checked: models.length > 0, disabled: models.length === 0 });
+    const crossedCount = section ? (store.section?.crossed.length ?? 0) : 0;
+    const useCrossed = h('input', { type: 'checkbox', checked: crossedCount > 0, disabled: crossedCount === 0 });
     const extraFiles: string[] = [];
     const extraList = h('div', { class: 'topic-gallery' });
     const addShot = (jpg: string, label: string) => {
@@ -259,9 +269,10 @@ export function createTopicsPanel(opts: TopicsPanelOptions): { load: () => void 
       try {
         const keepSection = useSection.checked && section;
         const lines = [desc.value.trim(), keepSection ? sectionText(section) : ''].filter(Boolean).join('\n\n');
+        const selection = useCrossed.checked ? await opts.crossedIds() : undefined;
         const viewpoint =
           useView.checked && camera
-            ? { ...camera, clippingPlanes: keepSection ? camera.clippingPlanes : undefined, snapshot: useModel.checked && modelShot ? modelShot : undefined }
+            ? { ...camera, clippingPlanes: keepSection ? camera.clippingPlanes : undefined, selection, snapshot: useModel.checked && modelShot ? modelShot : undefined }
             : undefined;
         const extras = [...(!viewpoint && useModel.checked && modelShot ? [modelShot] : []), ...(useMap.checked && mapShot ? [mapShot] : []), ...extraFiles];
         const topic = await api.create(
@@ -270,6 +281,14 @@ export function createTopicsPanel(opts: TopicsPanelOptions): { load: () => void 
           extras,
         );
         topicsStore.upsert({ ...topic, section: keepSection ? section : undefined });
+        if (useModels.checked && models.length) {
+          message.textContent = 'Linking the models…';
+          try {
+            await api.linkFiles(topic.guid, models);
+          } catch (err) {
+            throw new Error(`The topic was created, but the models could not be linked (${err instanceof Error ? err.message : String(err)})`);
+          }
+        }
         view = 'list';
         render();
       } catch (err) {
@@ -298,6 +317,9 @@ export function createTopicsPanel(opts: TopicsPanelOptions): { load: () => void 
         extraList,
         h('label', { class: 'topics-check' }, useView, ' Save this 3D camera position and direction'),
         h('label', { class: 'topics-check' }, useSection, ' Save this section line and its clipping'),
+        h('label', { class: 'topics-check' }, useModels, models.length ? ` Link the ${models.length === 1 ? 'model' : `${models.length} models`} ${section ? 'in this section' : 'loaded'}` : ' Link models (none loaded)'),
+        ...(models.length ? [h('p', { class: 'topics-note topic-models', textContent: models.map((m) => m.fileName).join(', ') })] : []),
+        h('label', { class: 'topics-check' }, useCrossed, crossedCount ? ` Select the ${crossedCount > 1000 ? 'first 1,000 of the ' : ''}${crossedCount.toLocaleString()} element${crossedCount === 1 ? '' : 's'} the section cuts` : ' Select the elements the section cuts (no section)'),
         h('p', { class: 'topics-note', textContent: section ? 'The topic is shown on the map at the section, and opens with the same cut here and in the Connect 3D viewer.' : 'No section is drawn, so the topic is placed where the 3D camera is.' }),
         message,
         h('div', { class: 'topics-actions' }, cancel, save),
@@ -380,9 +402,26 @@ export function createTopicsPanel(opts: TopicsPanelOptions): { load: () => void 
     body.append(addBar);
     body.append(h('div', { class: 'topics-grid two' }, h('label', {}, 'Status', status), h('label', {}, 'Assigned to', assignee), h('label', {}, 'Due date', due)), setBtn);
 
+    const linkedBox = h('p', { class: 'topics-note topic-models' });
+    let linked: TopicFile[] = [];
+    if (api) {
+      void api
+        .linkedFiles(topic.guid)
+        .then((files) => {
+          linked = files;
+          linkedBox.textContent = files.length ? `Models: ${files.map((f) => f.fileName).join(', ')}` : 'No models linked.';
+        })
+        .catch(() => (linkedBox.textContent = ''));
+    }
+    body.append(linkedBox);
     if (topic.section || topic.pin) {
       const go = h('button', { class: 'btn', type: 'button', textContent: topic.section ? 'Show this section' : 'Go to this place' });
-      go.addEventListener('click', () => {
+      go.addEventListener('click', async () => {
+        if (linked.length) {
+          go.disabled = true;
+          await opts.loadModels(linked).catch((err) => console.warn('[section viewer] could not load the linked models', err));
+          go.disabled = false;
+        }
         if (topic.section) opts.showSection(topic.section);
         else if (topic.pin) opts.showPlace(topic.pin.x, topic.pin.y);
       });

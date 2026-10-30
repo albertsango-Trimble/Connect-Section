@@ -1,3 +1,4 @@
+import type { IndexedModel } from '../connect/elementIndex';
 import { computeSection, type Element, type Section, type XY } from '../core/section';
 
 type Listener = () => void;
@@ -36,6 +37,8 @@ class Store {
   elements: Element[] = [];
   /** Incremented whenever `elements` is replaced */
   elementsVersion = 0;
+  /** The models loaded in the 3D viewer */
+  models: IndexedModel[] = [];
   /** Names of objects, filled in as they are looked up */
   names = new Map<string, string>();
 
@@ -75,8 +78,9 @@ class Store {
     this.listeners.forEach((l) => l());
   }
 
-  setElements(elements: Element[]): void {
+  setElements(elements: Element[], models: IndexedModel[] = this.models): void {
     this.elements = elements;
+    this.models = models;
     this.elementsVersion++;
     this.recompute();
   }

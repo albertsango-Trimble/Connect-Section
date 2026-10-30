@@ -22,6 +22,13 @@ export interface Topic {
   viewpointGuid?: string;
 }
 
+/** A design file (model) a topic is linked to. `reference` is the Connect file id. */
+export interface TopicFile {
+  fileName: string;
+  reference?: string;
+  ifcProject?: string;
+}
+
 export interface TopicComment {
   guid: string;
   comment: string;
@@ -74,6 +81,8 @@ export interface NewViewpoint {
   orthoSize?: number;
   /** The section's clipping planes, so the topic opens with the same cut in Connect */
   clippingPlanes?: ClippingPlane[];
+  /** Objects to save as selected in the viewpoint, by their IFC GUID (or other external id) */
+  selection?: string[];
   /** JPEG as a data URL */
   snapshot?: string;
 }
@@ -274,6 +283,7 @@ export class TopicsApi {
         ? { orthogonal_camera: { ...camera, view_to_world_scale: view.orthoSize } }
         : { perspective_camera: { ...camera, field_of_view: view.fieldOfView } };
     if (view.clippingPlanes?.length) viewpoint.clipping_planes = view.clippingPlanes;
+    if (view.selection?.length) viewpoint.components = { selection: view.selection.map((ifc_guid) => ({ ifc_guid })) };
     const data = view.snapshot?.split(',')[1];
     if (data) viewpoint.snapshot = { snapshot_type: 'jpg', snapshot_data: data };
     try {
@@ -306,6 +316,23 @@ export class TopicsApi {
     return (Array.isArray(rows) ? rows : [])
       .map((r) => ({ guid: str(r.guid) ?? '', comment: str(r.comment) ?? '', author: str(r.author), date: str(r.date) }))
       .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+  }
+
+  /** The design files (models) a topic is linked to. */
+  async linkedFiles(guid: string): Promise<TopicFile[]> {
+    const rows = await this.json<Json[]>(`/topics/${guid}/files`);
+    return (Array.isArray(rows) ? rows : []).flatMap((r) => {
+      const name = str(r.file_name);
+      return name ? [{ fileName: name, reference: str(r.reference), ifcProject: str(r.ifc_project) }] : [];
+    });
+  }
+
+  /** Links a topic to design files (models), replacing any it was linked to. */
+  async linkFiles(guid: string, files: TopicFile[]): Promise<void> {
+    const body = files.map((f) => ({ file_name: f.fileName, reference: f.reference, ...(f.ifcProject ? { ifc_project: f.ifcProject } : {}) }));
+    await this.json(`/topics/${guid}/files`, { method: 'PUT', body: JSON.stringify(body) });
+    // How Connect records the link isn't documented, so log what it kept for checking against topics made in Connect.
+    console.info('[section viewer] topic files saved', await this.linkedFiles(guid).catch((err) => String(err)));
   }
 
   async addComment(guid: string, comment: string): Promise<void> {

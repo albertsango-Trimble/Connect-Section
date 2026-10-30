@@ -32,6 +32,8 @@ export interface ModelPane {
   capture(maxWidth?: number): Promise<string | null>;
   /** The camera now as a topic viewpoint (model coordinates, metres), with the section's clipping planes */
   currentView(): Promise<Omit<NewViewpoint, 'snapshot'> | null>;
+  /** The external ids (IFC GUIDs for IFC models) of objects, at most `limit` */
+  externalIds(refs: ObjectRef[], limit?: number): Promise<string[]>;
 }
 
 type V3 = { x: number; y: number; z: number };
@@ -369,6 +371,24 @@ export function createModelPane(container: HTMLElement): ModelPane {
         console.warn('[section viewer] could not capture the 3D view', err);
         return null;
       }
+    },
+    async externalIds(refs, limit = 1000) {
+      if (!api) return [];
+      const byModel = new Map<string, number[]>();
+      for (const r of refs.slice(0, limit)) byModel.set(r.modelId, [...(byModel.get(r.modelId) ?? []), r.id]);
+      const out: string[] = [];
+      for (const [modelId, ids] of byModel) {
+        // The viewer throws if any one id has no external id, so ask in chunks and skip a chunk that fails.
+        for (let i = 0; i < ids.length; i += 200) {
+          try {
+            const found = await api.viewer.convertToObjectIds(modelId, ids.slice(i, i + 200));
+            out.push(...found.filter((g): g is string => typeof g === 'string' && g !== ''));
+          } catch (err) {
+            console.warn('[section viewer] could not read external ids', modelId, err);
+          }
+        }
+      }
+      return out;
     },
     async currentView() {
       if (!api) return null;

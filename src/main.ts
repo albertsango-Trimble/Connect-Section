@@ -71,6 +71,24 @@ const topicsPanel = createTopicsPanel({
     mapPane.flyTo((sec.a[0] + sec.b[0]) / 2, (sec.a[1] + sec.b[1]) / 2);
   },
   showPlace: (x, y) => mapPane.flyTo(x, y),
+  sectionModels: () => {
+    const s = store.section;
+    const cut = s ? new Set(s.crossed.map((e) => e.modelId)) : null;
+    return store.models
+      .filter((m) => !cut || cut.has(m.id))
+      .map((m) => ({ fileName: m.name, reference: m.fileId }));
+  },
+  crossedIds: () => modelPane.externalIds(store.section?.crossed ?? []),
+  loadModels: async (files) => {
+    if (!viewerApi) return;
+    const wanted = projectModels.filter((m) => files.some((f) => f.reference === m.id || f.reference === m.versionId || f.fileName.toLowerCase() === m.name.toLowerCase()));
+    if (!wanted.length) return;
+    // A model that was unticked is wanted again now, so take it off the left-out list.
+    const excluded = excludedModels(currentProject);
+    wanted.forEach((m) => excluded.delete(m.id));
+    saveExcluded(currentProject, excluded);
+    await loadModels(viewerApi, wanted);
+  },
   me: () => myEmail,
 });
 
@@ -146,7 +164,7 @@ const reindex = () => {
         indexAgain = false;
         const result = await readElements(viewerApi, (text) => store.setStatus(text, true));
         updatePlacement(result.elements[0]?.min[0]);
-        store.setElements(result.elements);
+        store.setElements(result.elements, result.models);
         const total = result.elements.length;
         store.setStatus(
           result.models.length === 0
