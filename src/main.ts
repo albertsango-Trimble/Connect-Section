@@ -8,6 +8,8 @@ import { RangeClient } from './core/geotiffTiles';
 import { createMapPane } from './panes/mapPane';
 import { createModelPane } from './panes/modelPane';
 import { refKey, store } from './state/store';
+import { TopicsApi } from './connect/topicsApi';
+import { createTopicsPanel } from './ui/topicsPanel';
 import { chooseSource } from './ui/sourceDialog';
 import { initSplitter } from './ui/splitters';
 
@@ -54,6 +56,23 @@ const mapPane = createMapPane(el('map'), {
 const naming = new Set<string>();
 
 const modelPane = createModelPane(el('model'));
+
+// ---- Topics: the same Connect topics as the 360 viewer, saved with the section ----
+let topicsApi: TopicsApi | null = null;
+let myEmail: string | undefined;
+const topicsPanel = createTopicsPanel({
+  button: el('btn-topics'),
+  api: () => topicsApi,
+  captureModel: () => modelPane.capture(),
+  captureMap: () => mapPane.capture(),
+  currentView: () => modelPane.currentView(),
+  showSection: (sec) => {
+    store.restoreSection([sec.a, sec.b], sec.side, sec.depth);
+    mapPane.flyTo((sec.a[0] + sec.b[0]) / 2, (sec.a[1] + sec.b[1]) / 2);
+  },
+  showPlace: (x, y) => mapPane.flyTo(x, y),
+  me: () => myEmail,
+});
 
 // ---- Toolbar ----
 const drawBtn = el<HTMLButtonElement>('btn-draw');
@@ -258,6 +277,10 @@ connectToHost()
     currentProject = host.projectId;
     mapPane.setProject(host.projectId);
     projectFiles = new ProjectFiles(host.projectId, host.token, host.location);
+    topicsApi = new TopicsApi(projectFiles, host.projectId);
+    // Load the topics now so their icons are on the map from the start.
+    topicsPanel.load();
+    void host.api.user.getUser().then((u) => (myEmail = u?.email)).catch((err) => console.warn('[section viewer] could not read the signed-in user', err));
     void initGeoreference(host.crs);
     let started = false;
     host.onToken((token) => {

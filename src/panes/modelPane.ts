@@ -4,6 +4,7 @@ import { runtimeIds } from '../connect/elementIndex';
 import { refKey, sameRef, store, type ObjectRef } from '../state/store';
 import { COLORS } from './mapPane';
 import type { WorkspaceApi } from '../connect/workspace';
+import type { NewViewpoint } from '../connect/topicsApi';
 
 const PLANE_SIGN_KEY = 'connectsection.planeSign';
 const readSign = (): 1 | -1 => {
@@ -27,6 +28,25 @@ export interface ModelPane {
   select(ref: ObjectRef): Promise<void>;
   /** Called after the models in the viewer change (loaded or unloaded) */
   onModelsChanged(callback: () => void): void;
+  /** The 3D viewer's current picture as a JPEG data URL, or null when it can't be read */
+  capture(maxWidth?: number): Promise<string | null>;
+  /** The camera now as a topic viewpoint (model coordinates, metres), with the section's clipping planes */
+  currentView(): Promise<Omit<NewViewpoint, 'snapshot'> | null>;
+}
+
+type V3 = { x: number; y: number; z: number };
+
+/** Rotates a vector by a quaternion. */
+function rotate(v: V3, q: { x: number; y: number; z: number; w: number }): V3 {
+  const ix = q.w * v.x + q.y * v.z - q.z * v.y;
+  const iy = q.w * v.y + q.z * v.x - q.x * v.z;
+  const iz = q.w * v.z + q.x * v.y - q.y * v.x;
+  const iw = -q.x * v.x - q.y * v.y - q.z * v.z;
+  return {
+    x: ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y,
+    y: iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
+    z: iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x,
+  };
 }
 
 /** Groups object references by model, the way the viewer's selectors want them. */
@@ -328,6 +348,58 @@ export function createModelPane(container: HTMLElement): ModelPane {
     },
     onModelsChanged(callback) {
       modelsChanged = callback;
+    },
+    async capture(maxWidth = 1280) {
+      if (!api) return null;
+      try {
+        const raw = await api.viewer.getSnapshot();
+        const img = new Image();
+        img.src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
+        await img.decode();
+        const scale = Math.min(1, maxWidth / img.naturalWidth);
+        const out = document.createElement('canvas');
+        out.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        out.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const g = out.getContext('2d') as CanvasRenderingContext2D;
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, out.width, out.height);
+        g.drawImage(img, 0, 0, out.width, out.height);
+        return out.toDataURL('image/jpeg', 0.85);
+      } catch (err) {
+        console.warn('[section viewer] could not capture the 3D view', err);
+        return null;
+      }
+    },
+    async currentView() {
+      if (!api) return null;
+      try {
+        const cam = await api.viewer.getCamera();
+        const p = cam.position;
+        if (!p) return null;
+        let dir: V3 | null = null;
+        if (cam.lookAt) dir = { x: cam.lookAt.x - p.x, y: cam.lookAt.y - p.y, z: cam.lookAt.z - p.z };
+        // The quaternion's identity looks straight down (-z) with +y up.
+        else if (cam.quaternion) dir = rotate({ x: 0, y: 0, z: -1 }, cam.quaternion);
+        const length = dir ? Math.hypot(dir.x, dir.y, dir.z) : 0;
+        if (!dir || !(length > 0)) return null;
+        const direction = { x: dir.x / length, y: dir.y / length, z: dir.z / length };
+        const s = store.section;
+        // BCF clipping planes point to the side that is cut away, the opposite of the planes' inward normals here.
+        const clippingPlanes = s?.planes.map((pl) => ({
+          location: { x: pl.point[0], y: pl.point[1], z: pl.point[2] },
+          direction: { x: -pl.inward[0], y: -pl.inward[1], z: -pl.inward[2] },
+        }));
+        return {
+          position: { x: p.x, y: p.y, z: p.z },
+          direction,
+          fieldOfView: cam.fieldOfView ?? 60,
+          orthoSize: cam.projectionType === 'ortho' && typeof cam.orthoSize === 'number' ? cam.orthoSize : undefined,
+          clippingPlanes,
+        };
+      } catch (err) {
+        console.warn('[section viewer] could not read the 3D camera', err);
+        return null;
+      }
     },
   };
 }

@@ -9,6 +9,8 @@ import { getProjectCrsName } from '../core/geo';
 import { isLocalGrid, mapToModel, modelToMap, onPlacementChange } from '../core/mapGeo';
 import { elementAt, type Element, type XY } from '../core/section';
 import { refKey, store, type ObjectRef } from '../state/store';
+import { topicsStore } from '../state/topics';
+import topicIconUrl from '../assets/topics-icon.png';
 
 type BaseMode = 'street' | 'satellite' | 'wmts' | 'geotiff';
 
@@ -68,6 +70,10 @@ export interface MapPane {
   startDrawing(): void;
   /** Zooms the map to the loaded models */
   fitModels(): void;
+  /** Centres the map on a place in model coordinates */
+  flyTo(x: number, y: number): void;
+  /** The map as it is now, as a JPEG data URL (at most `maxWidth` wide), or null if it can't be read */
+  capture(maxWidth?: number): string | null;
 }
 
 /** A GeoTIFF chosen to add: a file from this computer, or one in the project (read in place, never downloaded whole) */
@@ -117,6 +123,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     center: [0, 20],
     zoom: 1,
     dragRotate: true,
+    preserveDrawingBuffer: true, // so the map can be captured for topics
     style: {
       version: 8,
       sources: {
@@ -901,6 +908,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       const ev = lastMove;
       if (!ev) return;
       tipAt = { x: ev.point.x, y: ev.point.y };
+      if (drawing === 'idle') map.getCanvas().style.cursor = topicAt(ev.point) ? 'pointer' : '';
       const p = mapToModel(ev.lngLat.lng, ev.lngLat.lat);
       const el = p ? elementAt(p, store.elements) : null;
       const ref = el ? { modelId: el.modelId, id: el.id } : null;
@@ -914,6 +922,57 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     store.setMapHover(null);
     tip.hidden = true;
   });
+
+  // ---- Topics: an icon at each topic's section (or where its camera stood); a click opens it ----
+  let showTopics = true;
+  try {
+    showTopics = localStorage.getItem('connectsection.showTopics') !== '0';
+  } catch {
+    // storage unavailable
+  }
+  const topicsBtn = document.createElement('button');
+  topicsBtn.type = 'button';
+  topicsBtn.className = 'topics-toggle';
+  topicsBtn.innerHTML = `<img src="${topicIconUrl}" alt="" width="22" height="22" />`;
+  container.appendChild(topicsBtn);
+  const applyTopics = () => {
+    topicsBtn.classList.toggle('off', !showTopics);
+    topicsBtn.title = showTopics ? 'Topics are shown on the map. Click to hide them' : 'Topics are hidden. Click to show them on the map';
+    topicsBtn.setAttribute('aria-pressed', String(showTopics));
+    for (const id of ['topics', 'topic-lines']) if (ready && map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showTopics ? 'visible' : 'none');
+  };
+  topicsBtn.addEventListener('click', () => {
+    showTopics = !showTopics;
+    try {
+      localStorage.setItem('connectsection.showTopics', showTopics ? '1' : '0');
+    } catch {
+      // storage unavailable
+    }
+    applyTopics();
+  });
+  applyTopics();
+  const renderTopics = () => {
+    if (!ready) return;
+    const features: GeoJSON.Feature[] = [];
+    const lines: GeoJSON.Feature[] = [];
+    for (const t of topicsStore.topics) {
+      const sec = t.section;
+      const at = sec ? modelToMap((sec.a[0] + sec.b[0]) / 2, (sec.a[1] + sec.b[1]) / 2) : t.pin ? modelToMap(t.pin.x, t.pin.y) : null;
+      if (!at) continue;
+      features.push({ type: 'Feature', properties: { guid: t.guid, title: t.title }, geometry: { type: 'Point', coordinates: at } });
+      const a = sec ? modelToMap(sec.a[0], sec.a[1]) : null;
+      const b = sec ? modelToMap(sec.b[0], sec.b[1]) : null;
+      if (a && b) lines.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [a, b] } });
+    }
+    setData('topics', { type: 'FeatureCollection', features });
+    setData('topic-lines', { type: 'FeatureCollection', features: lines });
+  };
+  topicsStore.subscribe(renderTopics);
+  const topicAt = (point: maplibregl.Point): string | null => {
+    if (!showTopics || !map.getLayer('topics')) return null;
+    const hit = map.queryRenderedFeatures([[point.x - 4, point.y - 4], [point.x + 4, point.y + 4]], { layers: ['topics'] })[0];
+    return (hit?.properties?.guid as string | undefined) ?? null;
+  };
 
   // ---- Drawing a section line: click the start, then click the end ----
   let drawing: 'idle' | 'first' | 'second' = 'idle';
@@ -957,12 +1016,17 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       if (a && b && Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.05) store.setLine([a, b]);
       return;
     }
-    // Not drawing: a click on an element selects it in the 3D view.
+    // Not drawing: a click on a topic opens it, and a click on an element selects it in the 3D view.
+    const guid = topicAt(e.point);
+    if (guid) {
+      topicsStore.set({ openGuid: guid });
+      return;
+    }
     if (store.mapHover) options.selectInModel?.(store.mapHover);
   });
 
   map.on('load', () => {
-    for (const id of ['element-footprints', 'crossed', 'selected', 'hover', 'section-slab', 'section-line', 'section-draft', 'pick']) map.addSource(id, { type: 'geojson', data: empty() });
+    for (const id of ['topics', 'topic-lines', 'element-footprints', 'crossed', 'selected', 'hover', 'section-slab', 'section-line', 'section-draft', 'pick']) map.addSource(id, { type: 'geojson', data: empty() });
     map.addLayer({ id: 'element-footprints', type: 'line', source: 'element-footprints', paint: { 'line-color': COLORS.footprint, 'line-width': 0.6, 'line-opacity': 0.45 } });
     map.addLayer({ id: 'section-slab', type: 'fill', source: 'section-slab', paint: { 'fill-color': COLORS.slab, 'fill-opacity': 0.12 } });
     map.addLayer({ id: 'section-slab-line', type: 'line', source: 'section-slab', paint: { 'line-color': COLORS.slab, 'line-width': 1.2, 'line-dasharray': [3, 2] } });
@@ -975,6 +1039,14 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     map.addLayer({ id: 'section-casing', type: 'line', source: 'section-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6 } });
     map.addLayer({ id: 'section-line', type: 'line', source: 'section-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': COLORS.line, 'line-width': 3 } });
     map.addLayer({ id: 'section-draft', type: 'line', source: 'section-draft', paint: { 'line-color': COLORS.line, 'line-width': 2.5, 'line-dasharray': [2, 1.5] } });
+    map.addLayer({ id: 'topic-lines', type: 'line', source: 'topic-lines', layout: { visibility: showTopics ? 'visible' : 'none' }, paint: { 'line-color': '#8e44ad', 'line-width': 1.5, 'line-dasharray': [1, 1.5] } });
+    void map
+      .loadImage(topicIconUrl)
+      .then(({ data }) => {
+        if (!map.hasImage('topic-icon')) map.addImage('topic-icon', data, { pixelRatio: 2 });
+        if (!map.getLayer('topics')) map.addLayer({ id: 'topics', type: 'symbol', source: 'topics', layout: { 'icon-image': 'topic-icon', 'icon-allow-overlap': true, 'icon-ignore-placement': true, visibility: showTopics ? 'visible' : 'none' } });
+      })
+      .catch((err) => console.warn('[section viewer] could not load the topics icon', err));
     map.addLayer({ id: 'pick', type: 'circle', source: 'pick', paint: { 'circle-radius': 6, 'circle-color': COLORS.selected, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
     ready = true;
     if (wmts) setWmtsLayer(wmts);
@@ -982,6 +1054,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     renderElements();
     renderSection();
     renderLinks();
+    renderTopics();
     void restoreTiffs();
   });
 
@@ -1010,6 +1083,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     renderLinks();
   });
   onPlacementChange(() => {
+    renderTopics();
     showBase();
     fitted = false;
     renderElements();
@@ -1023,6 +1097,28 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   return {
     startDrawing,
     fitModels: () => fitModels(400),
+    flyTo: (x, y) => {
+      const ll = modelToMap(x, y);
+      if (ll) map.easeTo({ center: ll, zoom: Math.max(map.getZoom(), 18), duration: 600 });
+    },
+    capture: (maxWidth = 1280) => {
+      try {
+        map.triggerRepaint();
+        const src = map.getCanvas();
+        const scale = Math.min(1, maxWidth / src.width);
+        const out = document.createElement('canvas');
+        out.width = Math.max(1, Math.round(src.width * scale));
+        out.height = Math.max(1, Math.round(src.height * scale));
+        const g = out.getContext('2d') as CanvasRenderingContext2D;
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, out.width, out.height);
+        g.drawImage(src, 0, 0, out.width, out.height);
+        return out.toDataURL('image/jpeg', 0.85);
+      } catch (err) {
+        console.warn('[section viewer] could not capture the map', err);
+        return null;
+      }
+    },
     setProject: (id) => {
       projectKey = id;
       projectKnown = true;
