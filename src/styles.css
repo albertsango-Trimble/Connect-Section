@@ -185,3 +185,4 @@ body.resizing iframe { pointer-events: none; }
 .topics-toggle.off::after { content: ''; position: absolute; width: 28px; height: 2px; background: #c62828; transform: rotate(-45deg); }
 .topics-body > * { flex-shrink: 0; }
 .topics-toggle.none { opacity: 0.5; }
+.topic-models { font-size: 11px; overflow-wrap: anywhere; }
