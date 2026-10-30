@@ -186,3 +186,10 @@ body.resizing iframe { pointer-events: none; }
 .topics-body > * { flex-shrink: 0; }
 .topics-toggle.none { opacity: 0.5; }
 .topic-models { font-size: 11px; overflow-wrap: anywhere; }
+.survey-panel { width: min(400px, calc(100vw - 16px)); }
+.survey-select { flex: 1; min-width: 0; font: inherit; padding: 2px 4px; border: 1px solid #b5bec7; border-radius: 4px; }
+.survey-section { display: flex; flex-direction: column; gap: 6px; }
+.survey-job { display: flex; flex-direction: column; padding: 2px 0; }
+.survey-job .models-note { padding-left: 22px; }
+.models-note.error { color: #c62828; }
+#btn-survey.active, #btn-models.active { background: #0063a3; color: #fff; }

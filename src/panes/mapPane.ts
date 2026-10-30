@@ -10,6 +10,7 @@ import { isLocalGrid, mapToModel, modelToMap, onPlacementChange } from '../core/
 import { elementAt, type Element, type XY } from '../core/section';
 import { refKey, store, type ObjectRef } from '../state/store';
 import { topicsStore } from '../state/topics';
+import { surveyStore } from '../state/survey';
 import topicIconUrl from '../assets/topics-icon.png';
 
 type BaseMode = 'street' | 'satellite' | 'wmts' | 'geotiff';
@@ -116,7 +117,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     // storage unavailable
   }
   let wantTiff = saved.mode === 'geotiff' || !hadChoice;
-  const hasContent = () => store.elements.length > 0;
+  const hasContent = () => store.elements.length > 0 || surveyStore.jobs.length > 0;
 
   const map = new maplibregl.Map({
     container,
@@ -741,7 +742,6 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
 
   /** Bounds of every element on the map, for zooming to the models. */
   const modelBounds = (): maplibregl.LngLatBounds | null => {
-    if (!store.elements.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const e of store.elements) {
       x0 = Math.min(x0, e.min[0]);
@@ -749,6 +749,15 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       x1 = Math.max(x1, e.max[0]);
       y1 = Math.max(y1, e.max[1]);
     }
+    for (const { points } of surveyStore.visible()) {
+      for (const p of points) {
+        x0 = Math.min(x0, p.x);
+        y0 = Math.min(y0, p.y);
+        x1 = Math.max(x1, p.x);
+        y1 = Math.max(y1, p.y);
+      }
+    }
+    if (!Number.isFinite(x0)) return null;
     const sw = modelToMap(x0, y0);
     const ne = modelToMap(x1, y1);
     const nw = modelToMap(x0, y1);
@@ -882,15 +891,34 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   tip.hidden = true;
   container.appendChild(tip);
   let tipAt: { x: number; y: number } | null = null;
+  const surveyTip = (): string | null => {
+    const sp = surveyStore.point(surveyStore.hover);
+    if (!sp) return null;
+    const lib = surveyStore.library;
+    const def = sp.feature ? lib?.features.get(sp.feature.toUpperCase()) : undefined;
+    const lines = [
+      `Point ${sp.name}${sp.code ? ` · ${sp.code}` : ''}`,
+      ...(def?.description ? [def.description] : []),
+      ...(sp.description ? [sp.description] : []),
+      `E ${sp.x.toFixed(3)}  N ${sp.y.toFixed(3)}  ${sp.z === null ? '(no height)' : `Z ${sp.z.toFixed(3)}`}`,
+      ...sp.features.flatMap((f) => f.attributes.map((a) => `${a.name}: ${a.value}`)),
+    ];
+    return lines.join('\n');
+  };
   const updateTip = () => {
     const ref = store.mapHover;
-    if (!ref || !tipAt || drawing !== 'idle') {
+    const survey = drawing === 'idle' && tipAt ? surveyTip() : null;
+    if (!survey && (!ref || !tipAt || drawing !== 'idle')) {
       tip.hidden = true;
       return;
     }
-    const name = store.names.get(refKey(ref));
-    const crossed = store.section?.crossed.some((e) => e.modelId === ref.modelId && e.id === ref.id);
-    tip.textContent = `${name ?? 'Loading name…'}${crossed ? '\nCut by the section' : ''}`;
+    if (survey) tip.textContent = survey;
+    else if (ref) {
+      const name = store.names.get(refKey(ref));
+      const crossed = store.section?.crossed.some((e) => e.modelId === ref.modelId && e.id === ref.id);
+      tip.textContent = `${name ?? 'Loading name…'}${crossed ? '\nCut by the section' : ''}`;
+    }
+    if (!tipAt) return;
     tip.hidden = false;
     tip.style.left = `${Math.min(tipAt.x + 14, Math.max(0, container.clientWidth - tip.offsetWidth - 6))}px`;
     tip.style.top = `${tipAt.y + 14}px`;
@@ -909,6 +937,14 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
       if (!ev) return;
       tipAt = { x: ev.point.x, y: ev.point.y };
       if (drawing === 'idle') map.getCanvas().style.cursor = topicAt(ev.point) ? 'pointer' : '';
+      // A surveyed point under the mouse is shown in place of the element beneath it.
+      const sp = drawing === 'idle' ? surveyAt(ev.point) : null;
+      surveyStore.setHover(sp);
+      if (sp) {
+        store.setMapHover(null);
+        updateTip();
+        return;
+      }
       const p = mapToModel(ev.lngLat.lng, ev.lngLat.lat);
       const el = p ? elementAt(p, store.elements) : null;
       const ref = el ? { modelId: el.modelId, id: el.id } : null;
@@ -920,7 +956,47 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   container.addEventListener('mouseleave', () => {
     tipAt = null;
     store.setMapHover(null);
+    surveyStore.setHover(null);
     tip.hidden = true;
+  });
+
+  // ---- Survey data from JobXML: linework and points in their feature library colours ----
+  const surveyAt = (point: maplibregl.Point) => {
+    if (!map.getLayer('survey-points')) return null;
+    const hit = map.queryRenderedFeatures([[point.x - 5, point.y - 5], [point.x + 5, point.y + 5]], { layers: ['survey-points'] })[0];
+    const props = hit?.properties as { job?: string; name?: string } | undefined;
+    return props?.job && props.name !== undefined ? { jobId: props.job, name: String(props.name) } : null;
+  };
+  const renderSurvey = () => {
+    if (!ready) return;
+    const points: GeoJSON.Feature[] = [];
+    const lines: GeoJSON.Feature[] = [];
+    for (const { job, points: pts, strings } of surveyStore.visible()) {
+      for (const p of pts) {
+        const at = modelToMap(p.x, p.y);
+        if (at) points.push({ type: 'Feature', properties: { job: job.id, name: p.name, color: p.color, line: !p.isPointFeature }, geometry: { type: 'Point', coordinates: at } });
+      }
+      for (const s of strings) {
+        const coords = s.coords.map(([x, y]) => modelToMap(x, y));
+        if (coords.every((c): c is XY => !!c)) lines.push({ type: 'Feature', properties: { color: s.color, code: s.key }, geometry: { type: 'LineString', coordinates: coords } });
+      }
+    }
+    setData('survey-points', { type: 'FeatureCollection', features: points });
+    setData('survey-lines', { type: 'FeatureCollection', features: lines });
+  };
+  const renderSurveyHover = () => {
+    if (!ready) return;
+    const sp = surveyStore.point(surveyStore.hover);
+    const at = sp ? modelToMap(sp.x, sp.y) : null;
+    setData('survey-hover', { type: 'FeatureCollection', features: at ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: at } }] : [] });
+  };
+  let shownSurvey = -1;
+  surveyStore.subscribe(() => {
+    if (surveyStore.version !== shownSurvey) {
+      shownSurvey = surveyStore.version;
+      renderSurvey();
+    }
+    renderSurveyHover();
   });
 
   // ---- Topics: an icon at each topic's section (or where its camera stood); a click opens it ----
@@ -1026,7 +1102,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   });
 
   map.on('load', () => {
-    for (const id of ['topics', 'topic-lines', 'element-footprints', 'crossed', 'selected', 'hover', 'section-slab', 'section-line', 'section-draft', 'pick']) map.addSource(id, { type: 'geojson', data: empty() });
+    for (const id of ['survey-lines', 'survey-points', 'survey-hover', 'topics', 'topic-lines', 'element-footprints', 'crossed', 'selected', 'hover', 'section-slab', 'section-line', 'section-draft', 'pick']) map.addSource(id, { type: 'geojson', data: empty() });
     map.addLayer({ id: 'element-footprints', type: 'line', source: 'element-footprints', paint: { 'line-color': COLORS.footprint, 'line-width': 0.6, 'line-opacity': 0.45 } });
     map.addLayer({ id: 'section-slab', type: 'fill', source: 'section-slab', paint: { 'fill-color': COLORS.slab, 'fill-opacity': 0.12 } });
     map.addLayer({ id: 'section-slab-line', type: 'line', source: 'section-slab', paint: { 'line-color': COLORS.slab, 'line-width': 1.2, 'line-dasharray': [3, 2] } });
@@ -1039,6 +1115,9 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     map.addLayer({ id: 'section-casing', type: 'line', source: 'section-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6 } });
     map.addLayer({ id: 'section-line', type: 'line', source: 'section-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': COLORS.line, 'line-width': 3 } });
     map.addLayer({ id: 'section-draft', type: 'line', source: 'section-draft', paint: { 'line-color': COLORS.line, 'line-width': 2.5, 'line-dasharray': [2, 1.5] } });
+    map.addLayer({ id: 'survey-lines', type: 'line', source: 'survey-lines', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 2 } });
+    map.addLayer({ id: 'survey-points', type: 'circle', source: 'survey-points', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 1.5, 19, 4], 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 19, 1.2] } });
+    map.addLayer({ id: 'survey-hover', type: 'circle', source: 'survey-hover', paint: { 'circle-radius': 8, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': COLORS.hover, 'circle-stroke-width': 3 } });
     map.addLayer({ id: 'topic-lines', type: 'line', source: 'topic-lines', layout: { visibility: showTopics ? 'visible' : 'none' }, paint: { 'line-color': '#8e44ad', 'line-width': 1.5, 'line-dasharray': [1, 1.5] } });
     void map
       .loadImage(topicIconUrl)
@@ -1055,6 +1134,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
     renderSection();
     renderLinks();
     renderTopics();
+    renderSurvey();
     void restoreTiffs();
   });
 
@@ -1084,6 +1164,7 @@ export function createMapPane(container: HTMLElement, options: MapPaneOptions = 
   });
   onPlacementChange(() => {
     renderTopics();
+    renderSurvey();
     showBase();
     fitted = false;
     renderElements();
