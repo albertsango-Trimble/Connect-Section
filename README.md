@@ -28,6 +28,15 @@ Project Settings → Apps & Capabilities → Add Custom, then paste the manifest
   - 3D → map: objects you select or click in the 3D view are highlighted on the map, the picked point is marked, and the 3D camera's position and direction are shown on the map.
 - **Base maps** are the same as the 360 viewer: Street, Satellite, WMTS and GeoTIFF (from this computer or read in place from the project).
 
+## Survey data (Trimble JobXML)
+
+- **Survey** in the toolbar lists every JobXML file (`.jxl`) in the project. Tick one to show it, and it's loaded again next time. Files from this computer can be added for the visit.
+- Each point takes its best position from the file's `Reductions` section, falling back to the grid position in its `PointRecord`, or WGS84 converted to the project's coordinate system. Deleted points are left out. Grid coordinates are treated as model coordinates.
+- **Feature library.** It's chosen automatically: the `.fxl` the job was coded with (`FeatureCodingRecord/SourceFilename`) if it's in the project, otherwise the project's only `.fxl`. It can be changed in the panel or loaded from this computer.
+- **Linework** follows the codes the way Trimble Access draws it. Points with the same line or polygon code join in the order they were measured. Control codes after a feature code start, end or close a line, or begin and end an arc or a smooth curve. A trailing number keeps separate strings apart ("EB1", "EB2"). Lines and arcs recorded in the job (`LineRecord`, `ArcRecord`) are drawn too. With no library, a code that's ever followed by a control code is taken as a line, and common control codes (ST, END, CL, BA, EA and so on) are used.
+- **On the map:** points and lines in their library colours. Hovering a point shows its name, code, description, coordinates and attributes.
+- **In the 3D view:** points as point markups and lines as freeline markups. With a section drawn, only what lies inside it (±0.25 m) is drawn. Points with no height sit at the bottom of the section. The point hovered on the map gets a label in 3D.
+
 ## Known gaps and things to verify
 
 - **3D hover can't reach the map.** The Workspace API sends no hover event from the embedded viewer, only clicks (`viewer.onPicked`) and selection changes, so 3D → map highlighting follows the click, not the mouse.
@@ -35,6 +44,8 @@ Project Settings → Apps & Capabilities → Add Custom, then paste the manifest
 - **Crossing uses bounding boxes.** A diagonal pipe or wall has a box much bigger than its shape, so it can count as crossed when the line passes beside it.
 - **Orthographic size.** `orthoSize` is taken as the view height; check it frames the cut.
 - **No coordinate system.** If the project has none, or the model isn't in project coordinates, the map is a blank grid in model metres and base maps are greyed out.
+- **FXL format.** Trimble doesn't publish the `.fxl` layout, so the reader looks for any element with a code. The element name or its type says point, line, polygon or control code, and colour and layer come from attributes or child elements. Element names it doesn't understand are logged as `[section viewer] feature library elements not understood`. Check one real library.
+- **Field Data extension settings.** The library assigned in the Field Data extension's project settings isn't readable through the Connect API. The automatic choice uses the job's own library name, or the project's only `.fxl`.
 - **Many models.** Every model in the project is loaded at start. On a large project, untick the ones you don't need under **Models**.
 
 ## Layout

@@ -1,7 +1,11 @@
 import { ProjectFiles } from './connect/projectFiles';
 import { connectToHost, type WorkspaceApi } from './connect/workspace';
 import { objectName, readElements } from './connect/elementIndex';
-import { excludedModels, findProjectModels, loadModels, saveExcluded, unloadModels, type ProjectModel } from './connect/modelLoader';
+import { excludedModels, loadModels, saveExcluded, scanProject, unloadModels, type ProjectModel } from './connect/modelLoader';
+import { createSurveyPanel } from './ui/surveyPanel';
+import { createSurveyMarkups } from './panes/surveyMarkups';
+import { surveyStore } from './state/survey';
+import { inSlab } from './core/section';
 import { initGeoreference, onGeoChange } from './core/geo';
 import { updatePlacement } from './core/mapGeo';
 import { RangeClient } from './core/geotiffTiles';
@@ -56,6 +60,13 @@ const mapPane = createMapPane(el('map'), {
 const naming = new Set<string>();
 
 const modelPane = createModelPane(el('model'));
+
+// ---- Survey data: Trimble JobXML points and linework, coded with the project's feature library ----
+const surveyMarkups = createSurveyMarkups(() => viewerApi);
+const surveyPanel = createSurveyPanel(el('btn-survey'), {
+  zoom: () => mapPane.fitModels(),
+  status: (text) => store.setStatus(text),
+});
 
 // ---- Topics: the same Connect topics as the 360 viewer, saved with the section ----
 let topicsApi: TopicsApi | null = null;
@@ -138,12 +149,14 @@ const render = () => {
   } else {
     const n = s.crossed.length;
     const length = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
-    sectionInfo.textContent = `${length.toFixed(1)} m line · cuts ${n} element${n === 1 ? '' : 's'} · ${s.depth.toFixed(1)} m deep · ${(s.zMax - s.zMin).toFixed(1)} m high`;
+    const surveyed = surveyStore.visible().reduce((sum, v) => sum + v.points.filter((p) => inSlab(s, p.x, p.y, 0.25)).length, 0);
+    sectionInfo.textContent = `${length.toFixed(1)} m line · cuts ${n} element${n === 1 ? '' : 's'} · ${s.depth.toFixed(1)} m deep · ${(s.zMax - s.zMin).toFixed(1)} m high${surveyed ? ` · ${surveyed} survey point${surveyed === 1 ? '' : 's'}` : ''}`;
   }
   statusEl.textContent = store.status;
   statusEl.classList.toggle('busy', store.busy);
 };
 store.subscribe(render);
+surveyStore.subscribe(render);
 render();
 
 // ---- The object index: every object's bounding box, read again when models are loaded or unloaded ----
@@ -242,8 +255,10 @@ function renderModels() {
 async function ingestModels(api: WorkspaceApi) {
   if (!projectFiles) return;
   try {
-    projectModels = await findProjectModels(projectFiles, (text) => store.setStatus(text, true));
+    const scan = await scanProject(projectFiles, (text) => store.setStatus(text, true));
+    projectModels = scan.models;
     renderModels();
+    void surveyPanel.setProject(currentProject, projectFiles, scan.jobs, scan.libraries);
     const excluded = excludedModels(currentProject);
     const wanted = projectModels.filter((m) => !excluded.has(m.id));
     if (wanted.length) {
@@ -257,6 +272,21 @@ async function ingestModels(api: WorkspaceApi) {
     store.setStatus('Could not list the project models');
   }
   reindex();
+}
+
+/** A made-up survey: a kerb line with an arc along the front of the buildings, a closed slab outline and some trees. */
+function demoJob() {
+  const pts: [string, string, number, number, number | null][] = [
+    ['1', 'KB ST', -5, -3, 0.1], ['2', 'KB', 15, -3, 0.12], ['3', 'KB BA', 30, -3, 0.15], ['4', 'KB', 37, 0, 0.16], ['5', 'KB EA', 40, 7, 0.18], ['6', 'KB END', 40, 40, 0.3],
+    ['7', 'SLAB ST', 2, 2, 0], ['8', 'SLAB', 22, 2, 0], ['9', 'SLAB', 22, 14, 0], ['10', 'SLAB CL', 2, 14, 0],
+    ['11', 'TREE', 30, 30, 0.4], ['12', 'TREE', 33, 38, 0.4], ['13', 'TREE', 5, 30, null],
+  ];
+  return {
+    jobName: 'Demo',
+    points: pts.map(([name, code, x, y, z], order) => ({ name, code, x, y, z, order, features: code === 'TREE' ? [{ code: 'TREE', attributes: [{ name: 'Species', value: 'Spotted gum' }] }] : [] })),
+    lines: [],
+    skipped: 0,
+  };
 }
 
 /** Made-up objects on a local grid: three buildings with walls, slabs and columns, and a pipe run. */
@@ -289,6 +319,7 @@ connectToHost()
       const demo = demoElements();
       updatePlacement(demo[0].min[0]);
       store.setElements(demo);
+      surveyStore.addJob('demo', 'Demo survey.jxl', demoJob());
       store.setStatus('Demo data: open this extension inside a Trimble Connect project to load its models.');
       return;
     }
@@ -310,6 +341,7 @@ connectToHost()
       modelPane
         .start(host.projectId, host.token, (api) => {
           viewerApi = api;
+          surveyMarkups.onReset();
           void ingestModels(api);
         })
         .catch((err) => {

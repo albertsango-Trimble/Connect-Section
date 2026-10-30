@@ -21,6 +21,7 @@
       <button type="button" class="btn" id="btn-snap" title="Put the 3D view square-on to the cut again" disabled>Snap to section</button>
       <button type="button" class="btn" id="btn-clear" title="Remove the section line and its clipping" disabled>Clear</button>
       <button type="button" class="btn" id="btn-models" title="Choose which project models are loaded">Models</button>
+      <button type="button" class="btn" id="btn-survey" title="Show Trimble JobXML survey data, coded with the project's feature library">Survey</button>
       <button type="button" class="btn" id="btn-topics" title="Create and follow Trimble Connect topics"><img class="btn-icon" src="./src/assets/topics-icon.png" width="18" height="18" alt="" />Topics</button>
       <span id="status"></span>
     </header>
@@ -31,7 +32,7 @@
       <div class="models-note">Every model in the project is loaded when the extension opens. Untick one to leave it out next time.</div>
     </div>
     <main id="panes">
-      <section class="pane" id="pane-map"><div class="pane-title">Map<span class="pane-right"><button type="button" class="pane-check" id="btn-fit" title="Zoom the map to the loaded models">Zoom to models</button></span></div><div class="pane-body" id="map"></div></section>
+      <section class="pane" id="pane-map"><div class="pane-title">Map<span class="pane-right"><button type="button" class="pane-check" id="btn-fit" title="Zoom the map to the loaded models and survey data">Zoom to all</button></span></div><div class="pane-body" id="map"></div></section>
       <div class="splitter splitter-v" id="split-v" role="separator" aria-orientation="vertical" title="Drag to resize (double-click to reset)"></div>
       <section class="pane" id="pane-model"><div class="pane-title">3D section<span id="section-info"></span><span class="pane-right"><button type="button" class="pane-check" id="btn-invert" title="If the clipping keeps the wrong part of the model, swap which way the planes cut">Invert clipping</button><button type="button" class="pane-check" id="reload-model" title="Load the 3D viewer again, for example after it shows an error">Reload 3D</button></span></div><div class="pane-body" id="model"></div></section>
     </main>

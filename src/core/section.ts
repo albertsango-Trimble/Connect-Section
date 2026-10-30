@@ -207,3 +207,31 @@ export function elementAt(p: XY, elements: Element[]): Element | null {
   }
   return best;
 }
+
+/** Distance of a point into the kept side of each plane (negative when outside it). */
+const into = (pl: Plane, x: number, y: number) => (x - pl.point[0]) * pl.inward[0] + (y - pl.point[1]) * pl.inward[1];
+
+/** True when a point is inside the kept slab, or within `tolerance` metres of it. */
+export function inSlab(s: Section, x: number, y: number, tolerance = 0): boolean {
+  return s.planes.every((pl) => into(pl, x, y) >= -tolerance);
+}
+
+/**
+ * The part of the segment a→b inside the kept slab (grown by `tolerance`), as fractions along it, or null when
+ * it misses the slab. Clipped against each vertical plane in turn.
+ */
+export function clipToSlab(s: Section, a: XY, b: XY, tolerance = 0): [number, number] | null {
+  let t0 = 0;
+  let t1 = 1;
+  for (const pl of s.planes) {
+    const da = into(pl, a[0], a[1]) + tolerance;
+    const db = into(pl, b[0], b[1]) + tolerance;
+    if (da < 0 && db < 0) return null;
+    if (da >= 0 && db >= 0) continue;
+    const t = da / (da - db);
+    if (da < 0) t0 = Math.max(t0, t);
+    else t1 = Math.min(t1, t);
+    if (t0 > t1) return null;
+  }
+  return [t0, t1];
+}
